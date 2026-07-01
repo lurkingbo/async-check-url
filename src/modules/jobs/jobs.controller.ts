@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, Post, Body } from '@nestjs/common';
+import { Controller, Delete, Get, Post, Body, Param } from '@nestjs/common';
 
 import { CreateJobDto } from './dtos/create-job.dto';
 import { JobsService } from './jobs.service';
@@ -11,13 +11,13 @@ export class JobsController {
 
   @Get()
   public getJobList(): GetJobListResponse[] {
-    const list = this.jobsService.getJobList();
-
-    return list;
+    return this.jobsService.getJobList();
   }
 
   @Get('/:id')
-  public async getSpecificJob() {}
+  public async getSpecificJob(@Param() { id }: { id: string }) {
+    return this.jobsService.getSpecificJob(id);
+  }
 
   @Post()
   public createJob(@Body() createJobDto: CreateJobDto): CreateJobResponse {

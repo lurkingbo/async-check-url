@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import dayjs from 'dayjs';
+
 import { JobsStorageService } from './jobs-storage.service';
-import { Job, JobStatus, Url, UrlStatus } from './types';
+import { Job, JobStatus, UrlEntry, UrlStatus } from './types';
 
 @Injectable()
 export class JobsRunnerService {
@@ -8,7 +11,10 @@ export class JobsRunnerService {
   private activeUrls = 0;
   private queue: Array<() => void> = [];
 
-  constructor(private readonly jobsStorageService: JobsStorageService) {}
+  constructor(
+    private readonly jobsStorageService: JobsStorageService,
+    private readonly configService: ConfigService,
+  ) {}
 
   public run(jobId: string): void {
     void this.processJob(jobId);
@@ -30,7 +36,7 @@ export class JobsRunnerService {
     this.jobsStorageService.updateJobStatus(jobId, JobStatus.COMPLETED);
   }
 
-  private processUrl(job: Job, urlEntry: Url): Promise<void> {
+  private processUrl(job: Job, urlEntry: UrlEntry): Promise<void> {
     return this.withLimit(() => this.checkAndSaveUrl(job, urlEntry));
   }
 
@@ -60,31 +66,41 @@ export class JobsRunnerService {
     });
   }
 
-  private async checkUrl(url: string) {
+  private async checkUrl(url: string): Promise<Omit<UrlEntry, 'status'>> {
+    const start = dayjs.utc().toDate();
+
     try {
       const response = await fetch(url, {
         method: 'HEAD',
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(
+          Number(this.configService.getOrThrow<number>('REQUEST_TIMEOUT')),
+        ),
       });
 
       return {
         url,
+        start,
+        end: dayjs.utc().toDate(),
         statusCode: response.status,
-        success: response.ok,
+        statusText: response.statusText,
       };
-    } catch {
+    } catch (error) {
       return {
         url,
-        success: false,
+        start,
+        end: dayjs.utc().toDate(),
+        errorMessage: JSON.stringify(error),
       };
     }
   }
 
-  private async checkAndSaveUrl(job: Job, urlEntry: Url): Promise<void> {
+  private async checkAndSaveUrl(job: Job, urlEntry: UrlEntry): Promise<void> {
     const result = await this.checkUrl(urlEntry.url);
 
-    urlEntry.status = result.success ? UrlStatus.SUCCESS : UrlStatus.FAILED;
-    urlEntry.statusCode = result.statusCode;
+    Object.assign(urlEntry, {
+      ...result,
+      status: result.errorMessage ? UrlStatus.ERROR : UrlStatus.SUCCESS,
+    });
 
     await this.jobsStorageService.update(job);
   }

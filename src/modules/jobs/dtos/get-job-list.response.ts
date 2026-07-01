@@ -1,9 +1,10 @@
-import { Job, JobStatus, Url } from '../types';
+import { JobStatus } from '../types';
 
-export class GetJobListResponse implements Job {
+export class GetJobListResponse {
   id: string;
-  urls: Url[];
   status: JobStatus;
-  createdAt: string;
+  createdAt: Date;
   count: number;
+  succeeded: number;
+  failed: number;
 }

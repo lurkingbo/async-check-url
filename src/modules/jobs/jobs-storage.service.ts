@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { v7 as uuid } from 'uuid';
+import dayjs from 'dayjs';
+import utc from 'dayjs/plugin/utc';
+
 import { Job, JobStatus, UrlStatus } from './types';
+
+dayjs.extend(utc);
 
 @Injectable()
 export class JobsStorageService {
@@ -13,7 +18,7 @@ export class JobsStorageService {
       id,
       status: JobStatus.PENDING,
       urls: urls.map((url) => ({ status: UrlStatus.PENDING, url })),
-      createdAt: new Date().toISOString(),
+      createdAt: dayjs().utc().toDate(),
     });
 
     return id;

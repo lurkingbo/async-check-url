@@ -8,19 +8,25 @@ export const enum JobStatus {
 
 export const enum UrlStatus {
   PENDING = 'PENDING',
+  IN_PROGRESS = 'IN_PROGRESS',
   SUCCESS = 'SUCCESS',
-  FAILED = 'FAILED',
+  ERROR = 'ERROR',
+  CANCELLED = 'CANCELLED',
 }
 
-export interface Url {
+export interface UrlEntry {
   status: UrlStatus;
   statusCode?: number;
+  statusText?: string;
+  errorMessage?: string;
+  start?: Date;
+  end?: Date;
   url: string;
 }
 
 export interface Job {
   id: string;
-  urls: Url[];
+  urls: UrlEntry[];
   status: JobStatus;
-  createdAt: string;
+  createdAt: Date;
 }
