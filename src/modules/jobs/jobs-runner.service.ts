@@ -2,14 +2,13 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import dayjs from 'dayjs';
 
+import { Semaphore } from './semaphore';
 import { JobsStorageService } from './jobs-storage.service';
 import { Job, JobStatus, UrlEntry, UrlStatus } from './types';
 
 @Injectable()
 export class JobsRunnerService {
-  private readonly concurrencyLimit = 5;
-  private activeUrls = 0;
-  private queue: Array<() => void> = [];
+  private readonly semaphore = new Semaphore(5);
 
   constructor(
     private readonly jobsStorageService: JobsStorageService,
@@ -20,49 +19,63 @@ export class JobsRunnerService {
     void this.processJob(jobId);
   }
 
+  public cancelJob(jobId: string): void {
+    this.semaphore.cancelGroup(jobId);
+  }
+
   private async processJob(jobId: string): Promise<void> {
     const job = this.jobsStorageService.get(jobId);
 
-    if (!job) {
+    if (!job || this.semaphore.isGroupCancelled(jobId)) {
       return;
     }
 
     this.jobsStorageService.updateJobStatus(jobId, JobStatus.IN_PROGRESS);
 
     await Promise.all(
-      job.urls.map((urlEntry) => this.processUrl(job, urlEntry)),
+      job.urls.map((urlEntry) => this.processUrl(jobId, job, urlEntry)),
     );
 
-    this.jobsStorageService.updateJobStatus(jobId, JobStatus.COMPLETED);
+    if (!this.semaphore.isGroupCancelled(jobId)) {
+      this.jobsStorageService.updateJobStatus(jobId, JobStatus.COMPLETED);
+    }
   }
 
-  private processUrl(job: Job, urlEntry: UrlEntry): Promise<void> {
-    return this.withLimit(() => this.checkAndSaveUrl(job, urlEntry));
+  private processUrl(
+    jobId: string,
+    job: Job,
+    urlEntry: UrlEntry,
+  ): Promise<void> {
+    return this.semaphore.run({
+      groupId: jobId,
+      onCancel: () => this.cancelUrlIfPending(urlEntry),
+      onStart: () => {
+        urlEntry.status = UrlStatus.IN_PROGRESS;
+      },
+      task: () => this.checkAndSaveUrl(job, urlEntry),
+    });
   }
 
-  private withLimit(task: () => Promise<void>): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const start = () => {
-        this.activeUrls++;
+  private cancelUrlIfPending(urlEntry: UrlEntry): void {
+    if (urlEntry.status === UrlStatus.PENDING) {
+      urlEntry.status = UrlStatus.CANCELLED;
+    }
+  }
 
-        void task()
-          .then(resolve)
-          .catch(reject)
-          .finally(() => {
-            this.activeUrls--;
+  private async checkAndSaveUrl(job: Job, urlEntry: UrlEntry): Promise<void> {
+    const result = await this.checkUrl(urlEntry.url);
 
-            const next = this.queue.shift();
-            if (next) {
-              next();
-            }
-          });
-      };
+    this.applyCheckResult(urlEntry, result);
+    await this.jobsStorageService.update(job);
+  }
 
-      if (this.activeUrls < this.concurrencyLimit) {
-        start();
-      } else {
-        this.queue.push(start);
-      }
+  private applyCheckResult(
+    urlEntry: UrlEntry,
+    result: Omit<UrlEntry, 'status'>,
+  ): void {
+    Object.assign(urlEntry, {
+      ...result,
+      status: result.errorMessage ? UrlStatus.ERROR : UrlStatus.SUCCESS,
     });
   }
 
@@ -72,9 +85,7 @@ export class JobsRunnerService {
     try {
       const response = await fetch(url, {
         method: 'HEAD',
-        signal: AbortSignal.timeout(
-          Number(this.configService.getOrThrow<number>('REQUEST_TIMEOUT')),
-        ),
+        signal: AbortSignal.timeout(this.getRequestTimeout()),
       });
 
       return {
@@ -94,14 +105,7 @@ export class JobsRunnerService {
     }
   }
 
-  private async checkAndSaveUrl(job: Job, urlEntry: UrlEntry): Promise<void> {
-    const result = await this.checkUrl(urlEntry.url);
-
-    Object.assign(urlEntry, {
-      ...result,
-      status: result.errorMessage ? UrlStatus.ERROR : UrlStatus.SUCCESS,
-    });
-
-    await this.jobsStorageService.update(job);
+  private getRequestTimeout(): number {
+    return Number(this.configService.getOrThrow<number>('REQUEST_TIMEOUT'));
   }
 }

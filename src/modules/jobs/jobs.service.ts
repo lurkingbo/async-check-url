@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
+import dayjs from 'dayjs';
 
 import { JobsStorageService } from './jobs-storage.service';
 import { JobsRunnerService } from './jobs-runner.service';
 import { GetJobListResponse } from './dtos/get-job-list.response';
 import { GetJobResponse } from './dtos/get-job.response';
-import { UrlEntry, UrlStatus } from './types';
-import dayjs from 'dayjs';
+import { JobStatus, UrlEntry, UrlStatus } from './types';
 
 @Injectable()
 export class JobsService {
@@ -47,5 +47,22 @@ export class JobsService {
         })),
       };
     }
+  }
+
+  public cancelSpecificJob(id: string): void {
+    const job = this.jobsStorageService.get(id);
+
+    if (!job) {
+      return;
+    }
+
+    job.urls.forEach((url) => {
+      if (url.status === UrlStatus.PENDING) {
+        url.status = UrlStatus.CANCELLED;
+      }
+    });
+
+    this.jobsStorageService.updateJobStatus(id, JobStatus.CANCELLED);
+    this.jobsRunnerService.cancelJob(id);
   }
 }

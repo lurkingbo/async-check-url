@@ -27,5 +27,7 @@ export class JobsController {
   }
 
   @Delete('/:id')
-  public async cancelJob() {}
+  public cancelJob(@Param() { id }: { id: string }): void {
+    this.jobsService.cancelSpecificJob(id);
+  }
 }
